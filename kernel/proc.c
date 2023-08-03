@@ -189,17 +189,16 @@ proc_pagetable(struct proc *p)
   if(pagetable == 0)
     return 0;
 
-  //map a user read only page at USYSCALL, for optimization for the getpid()
+  // 将跳板代码（用于系统调用返回）映射到最高的用户虚拟地址
+  // 只有内核在进入/离开用户空间时使用它，所以不需要 PTE_U 标志
+
   if(mappages(pagetable, USYSCALL, PGSIZE,
               (uint64)(p->usyscall), PTE_R | PTE_U) < 0){
     uvmfree(pagetable, 0);
     return 0;
   }
 
-  // map the trampoline code (for system call return)
-  // at the highest user virtual address.
-  // only the supervisor uses it, on the way
-  // to/from user space, so not PTE_U.
+  // 将陷阱帧映射到 TRAMPOLINE 下面，用于 trampoline.S
   if(mappages(pagetable, TRAMPOLINE, PGSIZE,
               (uint64)trampoline, PTE_R | PTE_X) < 0){
     uvmfree(pagetable, 0);

@@ -439,26 +439,31 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 // A function that prints the contents of a page table.
 
-void
-vmprintwalk(pagetable_t pagetable, int depth)
+void vmprintwalk(pagetable_t pagetable, int depth)
 {
-  // there are 2^9 = 512 PTEs in a page table.
-  for(int i = 0; i < 512; i++){
+  // 一个页表中有 2^9 = 512 个 PTE（页表项）。
+  for (int i = 0; i < 512; i++) {
     pte_t pte = pagetable[i];
-    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
-      // this PTE points to a lower-level page table.
+    if ((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+      // 当前 PTE 指向一个更低级别的页表。
+      // 打印缩进（根据深度）和页表项的信息。
       for (int n = 0; n < depth; n++)
         printf(" ..");
       printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+
+      // 获取下一级页表的地址，并递归调用 vmprintwalk 函数打印下一级页表的内容。
       uint64 child = PTE2PA(pte);
-      vmprintwalk((pagetable_t)child, depth+1);
-    } else if(pte & PTE_V){
+      vmprintwalk((pagetable_t)child, depth + 1);
+    } else if (pte & PTE_V) {
+      // 当前 PTE 指向一个物理页。
+      // 打印缩进（根据深度）和页表项的信息。
       for (int n = 0; n < depth; n++)
         printf(" ..");
       printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
     }
   }
 }
+
 
 void
 vmprint(pagetable_t pagetable)
