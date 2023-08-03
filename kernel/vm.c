@@ -163,35 +163,39 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
-extern struct spinlock reflock;
-extern uint8 referencecount[PHYSTOP/PGSIZE];
-void
-uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+extern struct spinlock reflock;  // 引用计数锁
+extern uint8 referencecount[PHYSTOP/PGSIZE];  // 引用计数数组
+
+void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
-  uint64 a;
-  pte_t *pte;
+  uint64 a;  // 虚拟地址
+  pte_t *pte;  // 页表项指针
 
-  if((va % PGSIZE) != 0)
-    panic("uvmunmap: not aligned");
+  if ((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");  // 检查虚拟地址是否对齐
 
-  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
-    if(PTE_FLAGS(*pte) == PTE_V)
-      panic("uvmunmap: not a leaf");
-    acquire(&reflock);
-    referencecount[PGROUNDUP((PTE2PA(*pte)))/PGSIZE]--;
-    if(do_free && referencecount[PGROUNDUP((PTE2PA(*pte)))/PGSIZE] < 1){
-    // if(do_free){
-      uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+  for (a = va; a < va + npages * PGSIZE; a += PGSIZE) {
+    if ((pte = walk(pagetable, a, 0)) == 0)
+      panic("uvmunmap: walk");  // 检查页表项是否存在
+    if ((*pte & PTE_V) == 0)
+      panic("uvmunmap: not mapped");  // 检查页面是否映射
+    if (PTE_FLAGS(*pte) == PTE_V)
+      panic("uvmunmap: not a leaf");  // 检查是否为叶子节点
+
+    acquire(&reflock);  // 获取引用计数锁
+    referencecount[PGROUNDUP((PTE2PA(*pte))) / PGSIZE]--;  // 引用计数减1
+
+    if (do_free && referencecount[PGROUNDUP((PTE2PA(*pte))) / PGSIZE] < 1) {
+      // 如果需要释放页面，并且引用计数为0，释放物理页面
+      uint64 pa = PTE2PA(*pte);  // 获取物理地址
+      kfree((void *)pa);  // 释放物理页面
     }
-    release(&reflock);
-    *pte = 0;
+
+    release(&reflock);  // 释放引用计数锁
+    *pte = 0;  // 清除页表项
   }
 }
+
 
 // create an empty user page table.
 // returns 0 if out of memory.
@@ -307,44 +311,46 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // COW:
 // map the parent's physical pages into the child, instead of allocating new pages
 // clear PTE_W in the PTEs of both child and parent
-int
-uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+
+//使用了分页机制中为软件使用保留的第 8 位作为标志位，若其为 1 ，则说明其为 COW 页
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
-  pte_t *pte;
-  uint64 pa, i;
-  uint flags;
+  pte_t *pte;  // 页表项指针
+  uint64 pa, i;  // 物理地址和循环计数器
+  uint flags;  // 页表项标志位
   // char *mem;
 
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
-    *pte &= ~(PTE_W);
-    *pte |= PTE_COW;
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    // if((mem = kalloc()) == 0)
-    //   goto err;
-    // memmove(mem, (char*)pa, PGSIZE);
-    // if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-    //   kfree(mem);
-    //   goto err;
-    // }
-    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
-      goto err;
-    }
-    // printf("uvmcopy: lazy copying va=%p pa=%p\n",i,pa);
-    acquire(&reflock);
-    referencecount[PGROUNDUP((uint64)pa)/PGSIZE]++;
-    release(&reflock);
-  }
-  return 0;
+  for (i = 0; i < sz; i += PGSIZE) {
+    if ((pte = walk(old, i, 0)) == 0)
+      panic("uvmcopy: pte should exist");  // 检查页表项是否存在
+    if ((*pte & PTE_V) == 0)
+      panic("uvmcopy: page not present");  // 检查页面是否存在
 
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
+    // 设置页表项标志位
+    *pte &= ~(PTE_W);  // 清除写标志位
+    *pte |= PTE_COW;  // 设置写时复制标志位
+
+    pa = PTE2PA(*pte);  // 获取物理地址
+    flags = PTE_FLAGS(*pte);  // 获取页表项标志位
+
+    // 将页面映射到新的页表中
+    if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0) {
+      goto err;  // 映射失败，跳转到错误处理
+    }
+
+    // 增加引用计数
+    acquire(&reflock);  // 获取引用计数锁
+    referencecount[PGROUNDUP((uint64)pa) / PGSIZE]++;  // 将对应页面的引用计数增加1
+    release(&reflock);  // 释放引用计数锁
+  }
+
+  return 0;  // 拷贝完成，返回0
+
+err:
+  uvmunmap(new, 0, i / PGSIZE, 1);  // 错误处理时，解除新页表的映射
+  return -1;  // 返回错误码-1
 }
+
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
@@ -387,7 +393,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
       flags &= ~(PTE_COW);
       if((mem = kalloc()) == 0)
       {
-        // printf("copyout: kalloc failed, killed the process\n");
+        
         return -1;
       }
       memmove(mem, (char*)pa0, PGSIZE);

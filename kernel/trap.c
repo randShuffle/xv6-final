@@ -37,42 +37,40 @@ trapinithart(void)
 // called from trampoline.S
 //
 extern uint8 referencecount[PHYSTOP/PGSIZE];
-void
-usertrap(void)
+void usertrap(void)
 {
   int which_dev = 0;
 
-  if((r_sstatus() & SSTATUS_SPP) != 0)
+  // 检查是否在用户模式下发生异常
+  if ((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
 
-  // send interrupts and exceptions to kerneltrap(),
-  // since we're now in the kernel.
+  // 将中断和异常发送到kerneltrap()，因为现在在内核中
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
-  
-  // save user program counter.
-  p->trapframe->epc = r_sepc();
-  
-  if(r_scause() == 8){
-    // system call
 
-    if(p->killed)
+  // 保存用户程序计数器
+  p->trapframe->epc = r_sepc();
+
+  if (r_scause() == 8){
+    // 系统调用
+
+    if (p->killed)
       exit(-1);
 
-    // sepc points to the ecall instruction,
-    // but we want to return to the next instruction.
+    // sepc指向ecall指令，我们要返回到下一条指令
     p->trapframe->epc += 4;
 
-    // an interrupt will change sstatus &c registers,
-    // so don't enable until done with those registers.
+    // 在处理这些寄存器之前，中断会更改sstatus和其他寄存器，所以在完成之前不要启用中断。
     intr_on();
 
+    // 进行系统调用
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } else if ((which_dev = devintr()) != 0){
     // ok
   } else if (r_scause() == 12 || r_scause() == 15){
-    // deal with cow pages
+    // 处理写时复制页面
     pte_t *pte;
     uint64 pa, va;
     // uint64 va;
@@ -80,27 +78,24 @@ usertrap(void)
     char *mem;
 
     va = r_stval();
-    if(va >= MAXVA)
+    if (va >= MAXVA)
     {
       p->killed = 1;
       exit(-1);
     }
-      
-    if((pte = walk(p->pagetable, va, 0)) == 0)
+
+    if ((pte = walk(p->pagetable, va, 0)) == 0)
     {
-      // panic("cowhandler: pte should exist");
       p->killed = 1;
       exit(-1);
     }
-    if((*pte & PTE_V) == 0)
+    if ((*pte & PTE_V) == 0)
     {
-      // panic("cowhandler: page not present");
       p->killed = 1;
       exit(-1);
     }
-    if((*pte & PTE_COW) == 0)
+    if ((*pte & PTE_COW) == 0)
     {
-      // panic("cowhandler: page not cow");
       p->killed = 1;
       exit(-1);
     }
@@ -108,20 +103,17 @@ usertrap(void)
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte) | PTE_W;
     flags &= ~(PTE_COW);
-    // printf("cowhandler: scause=%d va=%p pa=%p\n",r_scause(),va,pa);
-    if((mem = kalloc()) == 0)
+
+    if ((mem = kalloc()) == 0)
     {
-      // printf("%d: cowhandler: kalloc failed, killed the process\n",p->pid);
       p->killed = 1;
       exit(-1);
     }
-    // printf("%d: cowhandler: kalloc succeeded with pa=%p\n",p->pid,mem);
-    // printf("%d: cowhandler: uvmunmap succeeded with va=%p\n",p->pid,PGROUNDDOWN(va));
+
     memmove(mem, (char*)pa, PGSIZE);
     uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 1);
-    // printf("%d: cowhandler: memmove succeeded with from pa=%p to mem=%p\n",p->pid,pa,mem);
-    // if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, flags) != 0){   <-------不知道为啥这个就不行
-    if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flags) != 0){
+
+    if (mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flags) != 0){
       kfree(mem);
       panic("cowhandler: mappages failed");
     }
@@ -132,15 +124,16 @@ usertrap(void)
     p->killed = 1;
   }
 
-  if(p->killed)
+  if (p->killed)
     exit(-1);
 
-  // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  // 如果这是一个定时器中断，则放弃CPU。
+  if (which_dev == 2)
     yield();
 
   usertrapret();
 }
+
 
 //
 // return to user space
