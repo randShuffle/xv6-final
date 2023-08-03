@@ -23,6 +23,7 @@ struct {
   struct run *freelist;
 } kmem;
 
+// COW 中一个物理页面不仅被映射给一个页表，故而需要一个数据结构维护其引用的数量
 struct spinlock reflock;
 uint8 referencecount[PHYSTOP/PGSIZE];
 
