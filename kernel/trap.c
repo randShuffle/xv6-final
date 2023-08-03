@@ -79,13 +79,15 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
   {
-    p->alarmticks += 1;
+    p->alarmticks += 1;// 将定时器计数器增加1
+    // 如果计数器超过定时器间隔,且间隔时间大于0
     if ((p->alarmticks >= p->alarminterval) && (p->alarminterval > 0))
     {
-      p->alarmticks = 0;
+      p->alarmticks = 0;//reset
       if (p->sigreturned == 1)
       {
         p->alarmtrapframe = *(p->trapframe);
+        // 设置trapframe的epc指向alarmhandler函数
         p->trapframe->epc = (uint64)p->alarmhandler;
         p->sigreturned = 0;
         usertrapret();

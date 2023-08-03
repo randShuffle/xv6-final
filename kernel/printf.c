@@ -114,25 +114,20 @@ printf(char *fmt, ...)
     release(&pr.lock);
 }
 
-void
-backtrace(void)
+void backtrace(void)
 {
-  // uint64 *fp = (uint64 *)r_fp();
-  // printf("fp=%p\n",fp);
-  // printf("*fp=%p\n",*fp);
-  // printf("*(fp-1)=%p\n",*(fp-1));
-  // printf("*(fp-2)=%p\n",*(fp-2));
-  // fp = (uint64 *)(*(fp-2));
-  // printf("fp=%p\n",fp);
-  // printf("*fp=%p\n",*fp);
-  // printf("*(fp-1)=%p\n",*(fp-1));
-  // printf("*(fp-2)=%p\n",*(fp-2));
+  // 打印backtrace的提示信息
   printf("backtrace:\n");
+  
+  // 使用r_fp()函数获取当前函数调用栈帧指针（frame pointer）
+  // 将其强制转换为uint64指针类型，并赋值给变量fp
   for (uint64 *fp = (uint64 *)r_fp(); (uint64)fp < PGROUNDUP((uint64)fp); fp = (uint64 *)(*(fp-2)))
   {
+    // 打印当前函数调用栈帧指针所指向的返回地址（*(fp-1)）
     printf("%p\n",*(fp-1));
   }
 }
+
 
 void
 panic(char *s)
