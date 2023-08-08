@@ -92,106 +92,108 @@ e1000_init(uint32 *xregs)
   regs[E1000_IMS] = (1 << 7); // RXDW -- Receiver Descriptor Write Back
 }
 
-int
-e1000_transmit(struct mbuf *m)
+int e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
+  // 获取锁，保证线程安全
   acquire(&e1000_lock);
-  // printf("e1000_transmit: called mbuf=%p\n",m);
-  uint32 idx = regs[E1000_TDT]; 
-  // ask the E1000 for the TX ring index 
-  // at which it's expecting the next packet, 
-  // by reading the E1000_TDT control register.
+
+  // 获取当前的 TX 环描述符索引
+  uint32 idx = regs[E1000_TDT];
+
+  // 检查 TX 环是否已满
   if (tx_ring[idx].status != E1000_TXD_STAT_DD)
   {
-    // check if the the ring is overflowing
-    // If E1000_TXD_STAT_DD is not set in the descriptor indexed by E1000_TDT, 
-    // the E1000 hasn't finished the corresponding previous transmission request, 
-    // so return an error.
-    printf("e1000_transmit: tx queue full\n");
+    // TX 环已满，返回错误
+    printf("e1000_transmit: tx队列已满\n");
+
+    // 同步内存访问
     __sync_synchronize();
-    // https://www.cnblogs.com/weijunji/p/xv6-study-16.html 的作者这里有__sync_synchronize(); 但本猫还没搞明白其作用。
+
+    // 释放锁
     release(&e1000_lock);
-    
+
     return -1;
-  } else {
-    // Otherwise, use mbuffree() to free the last mbuf 
-    // that was transmitted from that descriptor (if there was one).
+  }
+  else
+  {
+    // 如果存在上一个已传输的 mbuf，则释放它
     if (tx_mbufs[idx] != 0)
     {
-      // printf("e1000_transmit: freeing old mbuf tx_mbufs[%d]=%p\n",idx,tx_mbufs[idx]);
       mbuffree(tx_mbufs[idx]);
     }
-      
-    // Then fill in the descriptor. 
-    // m->head points to the packet's content in memory, 
-    // and m->len is the packet length.
+
+    // 填充描述符
     tx_ring[idx].addr = (uint64) m->head;
     tx_ring[idx].length = (uint16) m->len;
     tx_ring[idx].cso = 0;
     tx_ring[idx].css = 0;
-    // Set the necessary cmd flags 
-    // (look at Section 3.3 in the E1000 manual)
+
+    // 设置必要的命令标志位
     tx_ring[idx].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
-    // and stash away a pointer to the mbuf for later freeing.
+
+    // 保存 mbuf 的指针，以便后续释放
     tx_mbufs[idx] = m;
-    // Finally, update the ring position 
-    // by adding one to E1000_TDT modulo TX_RING_SIZE.
+
+    // 更新 TX 环的位置
     regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
-    // printf("e1000_transmit: package added to tx queue %d\n",idx);
   }
+
+  // 同步内存访问
   __sync_synchronize();
-  // https://www.cnblogs.com/weijunji/p/xv6-study-16.html 的作者这里有__sync_synchronize(); 但本猫还没搞明白其作用。
+
+  // 释放锁
   release(&e1000_lock);
 
   return 0;
 }
 
-extern void net_rx(struct mbuf *);
-static void
-e1000_recv(void)
-{
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
-  //
 
+extern void net_rx(struct mbuf *);
+static void e1000_recv(void)
+{
+  // 获取下一个期望接收的包的位置
   uint32 idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+
+  // 获取 RX 描述符
   struct rx_desc* dest = &rx_ring[idx];
-  // check if a new packet is available 
-  // by checking for the E1000_RXD_STAT_DD bit in the status portion of the descriptor
-  // 查了https://www.cnblogs.com/weijunji/p/xv6-study-16.html
-  // e1000_recv函数，这里注意一次中断应该把所有到达的数据都处理掉，剩下的按hints里面的来就行了
+
+  // 检查是否有新的数据包到达
   while (rx_ring[idx].status & E1000_RXD_STAT_DD)
   {
     acquire(&e1000_lock);
 
+    // 获取接收缓冲区
     struct mbuf *buf = rx_mbufs[idx];
+
+    // 将数据包长度添加到 mbuf 中
     mbufput(buf, dest->length);
+
+    // 分配新的 mbuf
     if (!(rx_mbufs[idx] = mbufalloc(0)))
-      panic("mbuf alloc failed");
+      panic("mbuf分配失败");
+
+    // 更新 RX 描述符的地址和状态
     dest->addr = (uint64)rx_mbufs[idx]->head;
     dest->status = 0;
+
+    // 更新 RDT 寄存器的值，表示接收到了一个新的数据包
     regs[E1000_RDT] = idx;
+
+    // 同步内存访问
     __sync_synchronize();
-    // https://www.cnblogs.com/weijunji/p/xv6-study-16.html 的作者这里有__sync_synchronize(); 但本猫还没搞明白其作用。
-    // 好像会使得发包收包的顺序有变化
+
+    // 释放锁
     release(&e1000_lock);
 
+    // 将接收到的数据包传递给网络层处理
     net_rx(buf);
+
+    // 更新下一个期望接收的包的位置
     idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
     dest = &rx_ring[idx];
   }
-  
 }
+
 
 void
 e1000_intr(void)
