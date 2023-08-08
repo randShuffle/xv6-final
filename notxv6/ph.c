@@ -37,29 +37,28 @@ insert(int key, int value, struct entry **p, struct entry *n)
   *p = e;
 }
 
-static 
-void put(int key, int value)
+static void put(int key, int value)
 {
-  
-  int i = key % NBUCKET;
+  int i = key % NBUCKET; // 根据键值计算哈希桶的索引
 
-  // is the key already present?
+  // 检查键是否已经存在
   struct entry *e = 0;
   for (e = table[i]; e != 0; e = e->next) {
     if (e->key == key)
       break;
   }
-  if(e){
-    // update the existing key.
+
+  if (e) {
+    // 键已经存在，更新对应的值
     e->value = value;
   } else {
-    // the new is new.
-    pthread_mutex_lock(&lock);
-    insert(key, value, &table[i], table[i]);
-    pthread_mutex_unlock(&lock);
+    // 键是新的，需要插入到哈希表中
+    pthread_mutex_lock(&lock); // 加锁，保证线程安全
+    insert(key, value, &table[i], table[i]); // 插入新的键值对
+    pthread_mutex_unlock(&lock); // 解锁
   }
-  
 }
+
 
 static struct entry*
 get(int key)

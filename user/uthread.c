@@ -94,19 +94,22 @@ thread_schedule(void)
     next_thread = 0;
 }
 
-void 
-thread_create(void (*func)())
+void thread_create(void (*func)())
 {
   struct thread *t;
 
+  // 遍历所有线程，查找一个空闲的线程
   for (t = all_thread; t < all_thread + MAX_THREAD; t++) {
     if (t->state == FREE) break;
   }
-  t->state = RUNNABLE;
-  // YOUR CODE HERE
-  t->context.ra = (uint64)func;
-  t->context.sp = (uint64)&t->stack[STACK_SIZE];
+  
+  t->state = RUNNABLE; // 将线程状态设置为可运行
+
+  // 设置线程的上下文
+  t->context.ra = (uint64)func; // 设置返回地址为传入的函数地址
+  t->context.sp = (uint64)&t->stack[STACK_SIZE]; // 设置栈指针为线程栈的顶部
 }
+
 
 void 
 thread_yield(void)
@@ -190,3 +193,5 @@ main(int argc, char *argv[])
   thread_schedule();
   exit(0);
 }
+
+
