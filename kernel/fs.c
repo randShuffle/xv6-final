@@ -374,58 +374,36 @@ iunlockput(struct inode *ip)
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
-static uint
-bmap(struct inode *ip, uint bn)
+static uint bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
 
   if(bn < NDIRECT){
+    // 如果逻辑块号 bn 小于 NDIRECT（12），则直接返回对应的物理块号
     if((addr = ip->addrs[bn]) == 0)
-      ip->addrs[bn] = addr = balloc(ip->dev);
+      ip->addrs[bn] = addr = balloc(ip->dev); // 如果物理块号为0，则分配一个新的物理块
     return addr;
   }
   bn -= NDIRECT;
 
   if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
+    // 加载间接块（indirect block），如果需要则进行分配
     if((addr = ip->addrs[NDIRECT]) == 0)
-      ip->addrs[NDIRECT] = addr = balloc(ip->dev);
-    bp = bread(ip->dev, addr);
+      ip->addrs[NDIRECT] = addr = balloc(ip->dev); // 如果物理块号为0，则分配一个新的物理块
+    bp = bread(ip->dev, addr); // 读取间接块的数据到缓冲区
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
-      a[bn] = addr = balloc(ip->dev);
-      log_write(bp);
+      a[bn] = addr = balloc(ip->dev); // 如果物理块号为0，则分配一个新的物理块
+      log_write(bp); // 写入对间接块的更改
     }
-    brelse(bp);
-    return addr;
-  }
-  bn -= NINDIRECT;
-
-  if(bn < NDOUBLEINDIRECT){
-    // load doubly-indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT+1]) == 0){
-      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
-    }
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn/NINDIRECT]) == 0){
-      a[bn/NINDIRECT] = addr = balloc(ip->dev);
-      log_write(bp);
-    }
-    brelse(bp);
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn%NINDIRECT]) == 0){
-      a[bn%NINDIRECT] = addr = balloc(ip->dev);
-      log_write(bp);
-    }
-    brelse(bp);
+    brelse(bp); // 释放缓冲区
     return addr;
   }
 
-  panic("bmap: out of range");
+  panic("bmap: out of range"); // 如果逻辑块号超出范围，则触发 panic（紧急情况下的错误处理）
 }
+
 
 // Truncate inode (discard contents).
 // Caller must hold ip->lock.

@@ -283,8 +283,7 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
-uint64
-sys_open(void)
+uint64 sys_open(void)
 {
   char path[MAXPATH];
   int fd, omode;
@@ -292,69 +291,80 @@ sys_open(void)
   struct inode *ip;
   int n;
 
+  // 从用户空间读取文件路径和打开模式
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
 
-  begin_op();
+  begin_op(); // 开始文件系统操作
 
   if(omode & O_CREATE){
+    // 如果打开模式包含 O_CREATE 标志，则创建一个新文件inode
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
-      end_op();
+      end_op(); // 结束文件系统操作
       return -1;
     }
   } else {
+    // 否则，根据文件路径查找相应的inode
     if((ip = namei(path)) == 0){
-      end_op();
+      end_op(); // 结束文件系统操作
       return -1;
     }
-    ilock(ip);
+    ilock(ip); // 锁定inode
+
+    // 如果是目录且打开模式不是 O_RDONLY，则报错
     if(ip->type == T_DIR && omode != O_RDONLY){
-      iunlockput(ip);
-      end_op();
+      iunlockput(ip); // 解锁并释放inode
+      end_op(); // 结束文件系统操作
       return -1;
     }
+
+    // 如果是符号链接且未设置 O_NOFOLLOW 标志，则根据符号链接路径查找对应的inode
     if(ip->type == T_SYMLINK) {
       if((omode & O_NOFOLLOW) == 0){
         char target[MAXPATH];
         int recursive_depth = 0;
         while(1){
           if(recursive_depth >= 10){
-	    iunlockput(ip);
-	    end_op();
-	    return -1;
-	  }
+            iunlockput(ip); // 解锁并释放inode
+            end_op(); // 结束文件系统操作
+            return -1;
+          }
           if(readi(ip, 0, (uint64)target, ip->size-MAXPATH, MAXPATH) != MAXPATH){
-	    return -1;
-	  }
-          iunlockput(ip);
-	  if((ip = namei(target)) == 0){
-	    end_op();
-	    return -1;
-	  }
-	  ilock(ip);
-	  if(ip->type != T_SYMLINK){
-	    break;
-	  }
-	  recursive_depth++;
+            return -1;
+          }
+          iunlockput(ip); // 解锁并释放inode
+          if((ip = namei(target)) == 0){
+            end_op(); // 结束文件系统操作
+            return -1;
+          }
+          ilock(ip); // 锁定inode
+          if(ip->type != T_SYMLINK){
+            break;
+          }
+          recursive_depth++;
         }
       }
     }
   }
+
+  // 检查设备类型是否合法
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
-    iunlockput(ip);
-    end_op();
+    iunlockput(ip); // 解锁并释放inode
+    end_op(); // 结束文件系统操作
     return -1;
   }
 
+  // 分配文件结构和文件描述符
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
-    iunlockput(ip);
-    end_op();
+    iunlockput(ip); // 解锁并释放inode
+    end_op(); // 结束文件系统操作
     return -1;
   }
 
+  // 根据inode类型设置文件类型和可读/可写属性
   if(ip->type == T_DEVICE){
     f->type = FD_DEVICE;
     f->major = ip->major;
@@ -366,14 +376,15 @@ sys_open(void)
   f->readable = !(omode & O_WRONLY);
   f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
 
+  // 如果打开模式包含 O_TRUNC 标志且inode为文件类型，则截断文件内容
   if((omode & O_TRUNC) && ip->type == T_FILE){
     itrunc(ip);
   }
 
-  iunlock(ip);
-  end_op();
+  iunlock(ip); // 解锁inode
+  end_op(); // 结束文件系统操作
 
-  return fd;
+  return fd; // 返回文件描述符
 }
 
 uint64
@@ -510,26 +521,34 @@ sys_pipe(void)
   return 0;
 }
 
-uint64
-sys_symlink(void){
+uint64 sys_symlink(void){
   char target[MAXPATH], path[MAXPATH];
   struct inode *ip;
 
+  // 从用户空间读取目标路径和符号链接路径
   if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0){
     return -1;
   }
 
-  begin_op();
+  begin_op(); // 开始文件系统操作
+
+  // 查找符号链接路径对应的inode
   if((ip = namei(path)) == 0){
+    // 如果不存在，则创建一个新的符号链接inode
     ip = create(path, T_SYMLINK, 0, 0);
-    iunlock(ip);
+    iunlock(ip); // 解锁inode
   }
 
-  ilock(ip);
+  ilock(ip); // 锁定inode
+
+  // 将目标路径写入符号链接inode的数据块
   if(writei(ip, 0, (uint64)target, ip->size, MAXPATH) != MAXPATH){
     return -1;
   }
-  iunlockput(ip);
-  end_op();
+
+  iunlockput(ip); // 解锁并释放inode
+  end_op(); // 结束文件系统操作
+
   return 0;
 }
+
