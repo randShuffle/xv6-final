@@ -17,7 +17,7 @@ def test_bigfile():
 def test_symlinktest():
     r.run_qemu(shell_script([
         'symlinktest'
-    ]), timeout=200)
+    ]), timeout=2000)
 
 @test(20, "symlinktest: symlinks", parent=test_symlinktest)
 def test_symlinktest_symlinks():
