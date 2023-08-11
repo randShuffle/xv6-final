@@ -1,11 +1,15 @@
 #include "types.h"
+#include "param.h"
+#include "date.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "memlayout.h"
 #include "riscv.h"
 #include "defs.h"
-#include "date.h"
-#include "param.h"
-#include "memlayout.h"
-#include "spinlock.h"
 #include "proc.h"
+#include "fcntl.h"
+#include "file.h"
 
 uint64
 sys_exit(void)
@@ -94,39 +98,4 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
-}
-
-void *sys_mmap(void)
-{
-  uint64 addr;
-  struct proc *p = myproc();
-  int length,prot,flags,fd,offset;
-  // if(argaddr(0, &addr) < 0)
-  //   return -1;
-
-  if(argint(1, &length) < 0)
-    return (void *)-1;
-  if(argint(1, &prot) < 0)
-    return (void *)-1;
-  if(argint(1, &flags) < 0)
-    return (void *)-1;
-  if(argint(1, &fd) < 0)
-    return (void *)-1;
-  if(argint(1, &offset) < 0)
-    return (void *)-1;
-  addr = p->sz;
-  p->sz += length;
-  return (void *)(addr);
-}
-
-int sys_munmap(void)
-{
-  uint64 addr;
-  int length;
-
-  if(argaddr(0, &addr) < 0)
-    return -1;
-  if(argint(1, &length) < 0)
-    return -1;
-  return 0;
 }
