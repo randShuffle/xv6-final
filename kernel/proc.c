@@ -354,96 +354,86 @@ reparent(struct proc *p)
 // until its parent calls wait().
 void exit(int status)
 {
-  struct proc *p = myproc();
-  // lab10
+    struct proc *p = myproc();  // 获取当前进程指针
+    int i;
+    struct vm_area* vma;  // 虚拟内存区域指针
+    uint maxsz = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;  // 最大大小
+    uint64 va;
+    uint n, n1, r;
 
-  // 检查是否为init进程，如果是则抛出panic异常
-  if(p == initproc)
-    panic("init exiting");
+    if(p == initproc)  // 如果当前进程为init进程，则抛出panic异常
+        panic("init exiting");
 
-  // 解除映射的内存 - lab10
-  for (i = 0; i < NVMA; ++i) {
-    if (p->vma[i].addr == 0) {
-      continue;
-    }
-    vma = &p->vma[i];
-    if ((vma->flags & MAP_SHARED)) {
-      // 将脏页写回文件
-      for (va = vma->addr; va < vma->addr + vma->len; va += PGSIZE) {
-        if (uvmgetdirty(p->pagetable, va) == 0) {
-          continue;
+    for (i = 0; i < NVMA; ++i) {  // 遍历进程的虚拟内存区域
+        if (p->vma[i].addr == 0) {
+            continue;
         }
-        n = min(PGSIZE, vma->addr + vma->len - va);
-        for (r = 0; r < n; r += n1) {
-          n1 = min(maxsz, n - i);
-          begin_op();
-          ilock(vma->f->ip);
-          if (writei(vma->f->ip, 1, va + i, va - vma->addr + vma->offset + i, n1) != n1) {
-            iunlock(vma->f->ip);
-            end_op();
-            panic("exit: writei failed");
-          }
-          iunlock(vma->f->ip);
-          end_op();
+        vma = &p->vma[i];
+
+        if ((vma->flags & MAP_SHARED)) {  // 如果该区域是共享区域
+            for (va = vma->addr; va < vma->addr + vma->len; va += PGSIZE) {
+                if (uvmgetdirty(p->pagetable, va) == 0) {
+                    continue;
+                }
+                n = min(PGSIZE, vma->addr + vma->len - va);
+                for (r = 0; r < n; r += n1) {
+                    n1 = min(maxsz, n - i);
+                    begin_op();
+                    ilock(vma->f->ip);
+                    if (writei(vma->f->ip, 1, va + i, va - vma->addr + vma->offset + i, n1) != n1) {
+                        iunlock(vma->f->ip);
+                        end_op();
+                        panic("exit: writei failed");
+                    }
+                    iunlock(vma->f->ip);
+                    end_op();
+                }
+            }
         }
-      }
+
+        uvmunmap(p->pagetable, vma->addr, (vma->len - 1) / PGSIZE + 1, 1);  // 取消虚拟内存区域的映射
+        vma->addr = 0;
+        vma->len = 0;
+        vma->offset = 0;
+        vma->flags = 0;
+        vma->offset = 0;
+        fileclose(vma->f);  // 关闭文件
+        vma->f = 0;
     }
-    // 取消映射
-    uvmunmap(p->pagetable, vma->addr, (vma->len - 1) / PGSIZE + 1, 1);
-    vma->addr = 0;
-    vma->len = 0;
-    vma->offset = 0;
-    vma->flags = 0;
-    vma->offset = 0;
-    fileclose(vma->f);
-    vma->f = 0;
-  }
 
-  // 关闭所有打开的文件
-  for(int fd = 0; fd < NOFILE; fd++){
-    if(p->ofile[fd]){
-      struct file *f = p->ofile[fd];
-      fileclose(f);
-      p->ofile[fd] = 0;
+    for(int fd = 0; fd < NOFILE; fd++){  // 关闭所有打开的文件
+        if(p->ofile[fd]){
+            struct file *f = p->ofile[fd];
+            fileclose(f);
+            p->ofile[fd] = 0;
+        }
     }
-  }
 
-  // 释放当前工作目录
-  begin_op();
-  iput(p->cwd);
-  end_op();
-  p->cwd = 0;
+    begin_op();
+    iput(p->cwd);  // 释放当前工作目录
+    end_op();
+    p->cwd = 0;
 
-  // 唤醒init进程
-  acquire(&initproc->lock);
-  wakeup1(initproc);
-  release(&initproc->lock);
+    acquire(&initproc->lock);  // 获取init进程的锁
+    wakeup1(initproc);  // 唤醒init进程
+    release(&initproc->lock);  // 释放init进程的锁
 
-  // 复制p->parent的副本，以确保我们解锁的是同一个父进程。即使我们在等待父锁时将自己交给init，
-  // 我们也不能精确地唤醒init。所以无论是否需要，都要唤醒init。init可能会错过这个唤醒，但似乎没有影响。
-  acquire(&p->lock);
-  struct proc *original_parent = p->parent;
-  release(&p->lock);
+    acquire(&p->lock);
+    struct proc *original_parent = p->parent;  // 复制父进程指针
+    release(&p->lock);
 
-  // 为了从wait()中唤醒父进程，我们需要父进程的锁。根据父子规则，我们必须先锁定父进程，然后再锁定子进程。
-  acquire(&original_parent->lock);
+    acquire(&original_parent->lock);  // 获取父进程的锁
+    acquire(&p->lock);
 
-  acquire(&p->lock);
+    reparent(p);  // 将所有子进程交给init进程
 
-  // 将所有子进程交给init进程
-  reparent(p);
+    wakeup1(original_parent);  // 唤醒父进程
+    p->xstate = status;  // 设置退出状态
+    p->state = ZOMBIE;  // 将进程状态设置为僵尸态
+    release(&original_parent->lock);  // 释放父进程的锁
 
-  // 唤醒父进程
-  wakeup1(original_parent);
-
-  p->xstate = status;
-  p->state = ZOMBIE;
-
-  release(&original_parent->lock);
-
-  // 跳转到调度器，不再返回
-  sched();
-  panic("zombie exit");
+    sched();  // 跳转到调度器，不再返回
+    panic("zombie exit");  // 抛出panic异常（永远不会执行到这一行）
 }
 
 // Wait for a child process to exit and return its pid.
