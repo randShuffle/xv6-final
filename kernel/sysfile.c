@@ -491,31 +491,36 @@ sys_pipe(void)
 
 // lab10
 uint64 sys_mmap(void) {
-  uint64 addr;
-  int len, prot, flags, offset;
-  struct file *f;
-  struct vm_area *vma = 0;
-  struct proc *p = myproc();
+  uint64 addr; // 存储映射的起始地址
+  int len, prot, flags, offset; // 长度、保护模式、标志、偏移量等参数
+  struct file *f; // 文件指针
+  struct vm_area *vma = 0; // 虚拟内存区域指针
+  struct proc *p = myproc(); // 获取当前进程
   int i;
 
+  // 从用户态获取参数，如果失败则返回-1
   if (argaddr(0, &addr) < 0 || argint(1, &len) < 0
       || argint(2, &prot) < 0 || argint(3, &flags) < 0
       || argfd(4, 0, &f) < 0 || argint(5, &offset) < 0) {
     return -1;
   }
+
+  // 检查标志参数，必须是MAP_SHARED或MAP_PRIVATE
   if (flags != MAP_SHARED && flags != MAP_PRIVATE) {
     return -1;
   }
-  // the file must be written when flag is MAP_SHARED
+
+  // 当标志为MAP_SHARED时，文件必须可写
   if (flags == MAP_SHARED && f->writable == 0 && (prot & PROT_WRITE)) {
     return -1;
   }
-  // offset must be a multiple of the page size
+
+  // 长度和偏移量必须是页大小的倍数
   if (len < 0 || offset < 0 || offset % PGSIZE) {
     return -1;
   }
 
-  // allocate a VMA for the mapped memory
+  // 为映射的内存分配一个VMA（虚拟内存区域）
   for (i = 0; i < NVMA; ++i) {
     if (!p->vma[i].addr) {
       vma = &p->vma[i];
@@ -526,13 +531,11 @@ uint64 sys_mmap(void) {
     return -1;
   }
 
-  // assume that addr will always be 0, the kernel
-  //choose the page-aligned address at which to create
-  //the mapping
+  // 假设addr始终为0，内核会选择一个页对齐的地址来创建映射
   addr = MMAPMINADDR;
   for (i = 0; i < NVMA; ++i) {
     if (p->vma[i].addr) {
-      // get the max address of the mapped memory
+      // 获取已映射内存的最大地址
       addr = max(addr, p->vma[i].addr + p->vma[i].len);
     }
   }
@@ -540,34 +543,38 @@ uint64 sys_mmap(void) {
   if (addr + len > TRAPFRAME) {
     return -1;
   }
+
+  // 设置VMA的属性
   vma->addr = addr;
   vma->len = len;
   vma->prot = prot;
   vma->flags = flags;
   vma->offset = offset;
   vma->f = f;
-  filedup(f);     // increase the file's reference count
+  filedup(f); // 增加文件的引用计数
 
   return addr;
 }
 
 // lab10
 uint64 sys_munmap(void) {
-  uint64 addr, va;
-  int len;
-  struct proc *p = myproc();
-  struct vm_area *vma = 0;
-  uint maxsz, n, n1;
+  uint64 addr, va; // 要解除映射的起始地址和当前地址
+  int len; // 要解除映射的长度
+  struct proc *p = myproc(); // 获取当前进程
+  struct vm_area *vma = 0; // 虚拟内存区域指针
+  uint maxsz, n, n1; // 最大可写入磁盘的大小，循环变量
   int i;
 
+  // 从用户态获取参数，如果失败则返回-1
   if (argaddr(0, &addr) < 0 || argint(1, &len) < 0) {
     return -1;
   }
+  // 地址必须是页大小的倍数，长度不能小于0
   if (addr % PGSIZE || len < 0) {
     return -1;
   }
 
-  // find the VMA
+  // 查找对应的VMA（虚拟内存区域）
   for (i = 0; i < NVMA; ++i) {
     if (p->vma[i].addr && addr >= p->vma[i].addr
         && addr + len <= p->vma[i].addr + p->vma[i].len) {
@@ -579,18 +586,20 @@ uint64 sys_munmap(void) {
     return -1;
   }
 
+  // 如果解除映射的长度为0，则直接返回0
   if (len == 0) {
     return 0;
   }
 
+  // 如果是共享映射（MAP_SHARED），则将脏页写回到映射的文件中
   if ((vma->flags & MAP_SHARED)) {
-    // the max size once can write to the disk
+    // 可以写入磁盘的最大大小
     maxsz = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
     for (va = addr; va < addr + len; va += PGSIZE) {
       if (uvmgetdirty(p->pagetable, va) == 0) {
         continue;
       }
-      // only write the dirty page back to the mapped file
+      // 只将脏页写回到映射的文件中
       n = min(PGSIZE, addr + len - va);
       for (i = 0; i < n; i += n1) {
         n1 = min(maxsz, n - i);
@@ -606,8 +615,11 @@ uint64 sys_munmap(void) {
       }
     }
   }
+
+  // 解除映射
   uvmunmap(p->pagetable, addr, (len - 1) / PGSIZE + 1, 1);
-  // update the vma
+
+  // 更新VMA的信息
   if (addr == vma->addr && len == vma->len) {
     vma->addr = 0;
     vma->len = 0;
